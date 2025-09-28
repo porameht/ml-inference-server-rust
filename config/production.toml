@@ -1,0 +1,12 @@
+# Production configuration for Sentence Transformer Inference Service
+
+[model]
+model_id = "sentence-transformers/all-mpnet-base-v2"
+tokenizer_repo = "sentence-transformers/all-mpnet-base-v2"
+max_sequence_length = 512
+device = "cpu"  # Change to "cuda" if GPU is available
+
+[server]
+host = "0.0.0.0"
+port = 8080
+workers = 8

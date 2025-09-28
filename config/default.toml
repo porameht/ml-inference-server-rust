@@ -1,0 +1,10 @@
+[model]
+model_id = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer_repo = "sentence-transformers/all-MiniLM-L6-v2"
+max_sequence_length = 512
+device = "cpu"
+
+[server]
+host = "127.0.0.1"
+port = 8080
+workers = 4

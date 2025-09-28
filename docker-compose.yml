@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  inference-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+      - INFERENCE_SERVER__HOST=0.0.0.0
+      - INFERENCE_SERVER__PORT=8080
+      - INFERENCE_MODEL__DEVICE=cpu
+    volumes:
+      - ./config:/app/config:ro
+      - model_cache:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  model_cache:
+    driver: local

@@ -1,0 +1,12 @@
+# Test configuration for Sentence Transformer Inference Service
+
+[model]
+model_id = "mock-model"
+tokenizer_repo = "mock-tokenizer"
+max_sequence_length = 256
+device = "cpu"
+
+[server]
+host = "127.0.0.1"
+port = 8081
+workers = 1

@@ -1,0 +1,36 @@
+# Pre-configured model configurations for easy switching
+
+[models.all-minilm-l6-v2]
+model_id = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer_repo = "sentence-transformers/all-MiniLM-L6-v2"
+max_sequence_length = 512
+device = "cpu"
+description = "Fast and efficient general-purpose sentence embeddings"
+
+[models.all-mpnet-base-v2]
+model_id = "sentence-transformers/all-mpnet-base-v2"
+tokenizer_repo = "sentence-transformers/all-mpnet-base-v2"
+max_sequence_length = 512
+device = "cpu"
+description = "Higher quality sentence embeddings with better performance"
+
+[models.multilingual-e5-base]
+model_id = "intfloat/multilingual-e5-base"
+tokenizer_repo = "intfloat/multilingual-e5-base"
+max_sequence_length = 512
+device = "cpu"
+description = "Multilingual sentence embeddings supporting 100+ languages"
+
+[models.bge-small-en-v1.5]
+model_id = "BAAI/bge-small-en-v1.5"
+tokenizer_repo = "BAAI/bge-small-en-v1.5"
+max_sequence_length = 512
+device = "cpu"
+description = "Compact and efficient embeddings optimized for English"
+
+[models.gte-large]
+model_id = "thenlper/gte-large"
+tokenizer_repo = "thenlper/gte-large"
+max_sequence_length = 512
+device = "cpu"
+description = "Large model with superior performance for semantic search"
