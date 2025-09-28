@@ -1,10 +1,16 @@
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
+
+#[cfg(feature = "accelerate")]
+extern crate accelerate_src;
+
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use candle_core::Device;
 use candle_nn::VarBuilder;
-use candle_transformers::models::bert::{BertModel, Config as BertConfig};
-use hf_hub::api::tokio::Api;
-use tokenizers::Tokenizer;
+use candle_transformers::models::bert::{BertModel, Config as BertConfig, HiddenAct, DTYPE};
+use hf_hub::{api::sync::Api, Repo, RepoType};
+use tokenizers::{Tokenizer, PaddingParams};
 use tokio::sync::RwLock;
 
 use crate::domain::entities::ModelConfig;
@@ -38,31 +44,54 @@ impl CandleModelLoader {
 
         let device = self.get_device(&config.device)?;
         
-        let api = Api::new()
-            .map_err(|e| anyhow!("Failed to create HuggingFace API client: {}", e))?;
-        
-        tracing::debug!("Created HF API client successfully");
-        
-        let repo = api.model(config.model_id.clone());
-        tracing::debug!("Created model repository handle for: {}", config.model_id);
-
-        let tokenizer_filename = repo.get("tokenizer.json").await?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename)
-            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
-
-        let config_filename = repo.get("config.json").await?;
-        let config_content = std::fs::read_to_string(config_filename)?;
-        let bert_config: BertConfig = serde_json::from_str(&config_content)?;
-
-        let weights_filename = match repo.get("pytorch_model.bin").await {
-            Ok(path) => path,
-            Err(_) => repo.get("model.safetensors").await?,
+        let (default_model, default_revision) = self.get_default_model_config();
+        let (model_id, revision) = if config.model_id.is_empty() {
+            (default_model, default_revision)
+        } else {
+            (config.model_id.clone(), config.revision.clone().unwrap_or_else(|| "main".to_string()))
         };
 
-        let weights = candle_core::safetensors::load(&weights_filename, &device)?;
-        let var_builder = VarBuilder::from_tensors(weights, candle_core::DType::F32, &device);
+        let repo = Repo::with_revision(model_id, RepoType::Model, revision);
+        let (config_filename, tokenizer_filename, weights_filename) = {
+            let api = Api::new()?;
+            let api = api.repo(repo);
+            let config_file = api.get("config.json")?;
+            let tokenizer_file = api.get("tokenizer.json")?;
+            let weights = if config.use_pth.unwrap_or(false) {
+                api.get("pytorch_model.bin")?
+            } else {
+                api.get("model.safetensors")?
+            };
+            (config_file, tokenizer_file, weights)
+        };
 
-        let model = BertModel::load(var_builder, &bert_config)?;
+        let config_content = std::fs::read_to_string(config_filename)?;
+        let mut bert_config: BertConfig = serde_json::from_str(&config_content)?;
+        let mut tokenizer = Tokenizer::from_file(tokenizer_filename)
+            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
+
+        // Configure tokenizer for batch processing
+        if let Some(pp) = tokenizer.get_padding_mut() {
+            pp.strategy = tokenizers::PaddingStrategy::BatchLongest;
+        } else {
+            let pp = PaddingParams {
+                strategy: tokenizers::PaddingStrategy::BatchLongest,
+                ..Default::default()
+            };
+            tokenizer.with_padding(Some(pp));
+        }
+
+        let vb = if config.use_pth.unwrap_or(false) {
+            VarBuilder::from_pth(&weights_filename, DTYPE, &device)?
+        } else {
+            unsafe { VarBuilder::from_mmaped_safetensors(&[weights_filename], DTYPE, &device)? }
+        };
+
+        if config.approximate_gelu.unwrap_or(false) {
+            bert_config.hidden_act = HiddenAct::GeluApproximate;
+        }
+
+        let model = BertModel::load(vb, &bert_config)?;
 
         Ok(ModelComponents {
             model,
@@ -102,6 +131,10 @@ impl CandleModelLoader {
                 Ok(Device::Cpu)
             }
         }
+    }
+
+    fn get_default_model_config(&self) -> (String, String) {
+        ("sentence-transformers/all-MiniLM-L6-v2".to_string(), "refs/pr/21".to_string())
     }
 }
 

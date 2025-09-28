@@ -7,6 +7,8 @@ pub struct ModelConfig {
     pub revision: Option<String>,
     pub max_sequence_length: usize,
     pub device: String,
+    pub use_pth: Option<bool>,
+    pub approximate_gelu: Option<bool>,
 }
 
 impl Default for ModelConfig {
@@ -14,9 +16,11 @@ impl Default for ModelConfig {
         Self {
             model_id: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
             tokenizer_repo: "sentence-transformers/all-MiniLM-L6-v2".to_string(),
-            revision: None,
+            revision: Some("refs/pr/21".to_string()),
             max_sequence_length: 512,
             device: "cpu".to_string(),
+            use_pth: Some(false),
+            approximate_gelu: Some(false),
         }
     }
 }

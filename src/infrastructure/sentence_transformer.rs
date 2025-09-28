@@ -1,3 +1,9 @@
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
+
+#[cfg(feature = "accelerate")]
+extern crate accelerate_src;
+
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use candle_core::Tensor;
@@ -25,66 +31,90 @@ impl SentenceTransformerService {
             .as_ref()
             .ok_or_else(|| anyhow!("No model loaded"))?;
 
-        let mut embeddings = Vec::new();
+        if texts.len() == 1 {
+            // Single text encoding
+            self.encode_single_text(&texts[0], components, normalize).await
+        } else {
+            // Batch encoding for better performance
+            self.encode_batch_texts(texts, components, normalize).await
+        }
+    }
 
-        for text in texts {
-            let encoding = components
-                .tokenizer
-                .encode(text.as_str(), true)
-                .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+    async fn encode_single_text(&self, text: &str, components: &crate::infrastructure::model_loader::ModelComponents, normalize: bool) -> Result<Vec<Vec<f32>>> {
+        let encoding = components.tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
-            let tokens = encoding.get_ids();
-            let token_ids = Tensor::new(tokens, &components.device)?
-                .unsqueeze(0)?;
+        let tokens = encoding.get_ids().to_vec();
+        let token_ids = Tensor::new(&tokens[..], &components.device)?.unsqueeze(0)?;
+        let token_type_ids = token_ids.zeros_like()?;
 
-            let attention_mask = Tensor::ones(
-                (1, tokens.len()),
-                candle_core::DType::U8,
-                &components.device,
-            )?;
+        let ys = components.model.forward(&token_ids, &token_type_ids, None)?;
+        
+        let embedding = if normalize {
+            self.normalize_l2(&ys)?
+        } else {
+            ys
+        };
 
-            let token_type_ids = Tensor::zeros(
-                (1, tokens.len()),
-                candle_core::DType::U8,
-                &components.device,
-            )?;
+        let embedding_vec = embedding.to_vec1::<f32>()?;
+        Ok(vec![embedding_vec])
+    }
 
-            let outputs = components.model.forward(
-                &token_ids,
-                &token_type_ids,
-                Some(&attention_mask),
-            )?;
+    async fn encode_batch_texts(&self, texts: &[String], components: &crate::infrastructure::model_loader::ModelComponents, normalize: bool) -> Result<Vec<Vec<f32>>> {
+        let tokens = components.tokenizer
+            .encode_batch(texts.to_vec(), true)
+            .map_err(|e| anyhow!("Batch tokenization failed: {}", e))?;
 
-            let pooled_output = self.mean_pooling(&outputs, &attention_mask)?;
-            
-            let embedding = if normalize {
-                self.normalize_tensor(&pooled_output)?
-            } else {
-                pooled_output
-            };
+        let token_ids = tokens
+            .iter()
+            .map(|tokens| {
+                let tokens = tokens.get_ids().to_vec();
+                Ok(Tensor::new(tokens.as_slice(), &components.device)?)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
+        let attention_mask = tokens
+            .iter()
+            .map(|tokens| {
+                let tokens = tokens.get_attention_mask().to_vec();
+                Ok(Tensor::new(tokens.as_slice(), &components.device)?)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let token_ids = Tensor::stack(&token_ids, 0)?;
+        let attention_mask = Tensor::stack(&attention_mask, 0)?;
+        let token_type_ids = token_ids.zeros_like()?;
+
+        tracing::debug!("Running inference on batch {:?}", token_ids.shape());
+        let embeddings = components.model.forward(&token_ids, &token_type_ids, Some(&attention_mask))?;
+        tracing::debug!("Generated embeddings {:?}", embeddings.shape());
+
+        // Apply mean pooling by taking the mean embedding value for all tokens (including padding)
+        let (_n_sentence, n_tokens, _hidden_size) = embeddings.dims3()?;
+        let pooled_embeddings = (embeddings.sum(1)? / (n_tokens as f64))?;
+        
+        let final_embeddings = if normalize {
+            self.normalize_l2(&pooled_embeddings)?
+        } else {
+            pooled_embeddings
+        };
+
+        tracing::debug!("Pooled embeddings {:?}", final_embeddings.shape());
+
+        // Convert to Vec<Vec<f32>>
+        let mut result = Vec::new();
+        for i in 0..texts.len() {
+            let embedding = final_embeddings.get(i)?;
             let embedding_vec = embedding.to_vec1::<f32>()?;
-            embeddings.push(embedding_vec);
+            result.push(embedding_vec);
         }
 
-        Ok(embeddings)
+        Ok(result)
     }
 
-    fn mean_pooling(&self, token_embeddings: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
-        let attention_mask = attention_mask.to_dtype(candle_core::DType::F32)?;
-        let attention_mask = attention_mask.unsqueeze(2)?;
-        let attention_mask = attention_mask.expand(token_embeddings.shape())?;
-
-        let masked_embeddings = token_embeddings.mul(&attention_mask)?;
-        let sum_embeddings = masked_embeddings.sum(1)?;
-        let sum_mask = attention_mask.sum(1)?;
-        
-        Ok(sum_embeddings.div(&sum_mask)?)
-    }
-
-    fn normalize_tensor(&self, tensor: &Tensor) -> Result<Tensor> {
-        let norm = tensor.sqr()?.sum_keepdim(1)?.sqrt()?;
-        Ok(tensor.div(&norm)?)
+    fn normalize_l2(&self, v: &Tensor) -> Result<Tensor> {
+        Ok(v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)?)
     }
 }
 
