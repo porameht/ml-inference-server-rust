@@ -1,17 +1,13 @@
-mod domain;
-mod infrastructure;
-mod application;
-mod presentation;
-
-use std::sync::Arc;
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
+use tokio::net::TcpListener;
+use tower_http::trace::TraceLayer;
 
-use application::ApplicationServices;
-use presentation::InferenceServer;
+use inference::{DiContainer, infrastructure::config::ServerConfig, presentation::api::create_router};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -25,13 +21,28 @@ async fn main() -> Result<()> {
 
     tracing::info!("🤖 Initializing Sentence Transformer Inference Service");
 
-    // Create services with real Hugging Face models
-    let services = ApplicationServices::new().await?;
+    // Create DI container with all dependencies
+    let container = DiContainer::new().await?;
 
-    let server_config = infrastructure::ServerConfig::default();
-    let server = InferenceServer::new(Arc::new(services), server_config);
+    // Create router and server
+    let server_config = ServerConfig::default();
+    let app = create_router(container.embedding_use_case)
+        .layer(TraceLayer::new_for_http());
+
+    let addr = format!("{}:{}", server_config.host, server_config.port);
     
-    server.start().await?;
+    tracing::info!("🚀 Starting Sentence Transformer API server");
+    tracing::info!("   📍 Address: http://{}", addr);
+    tracing::info!("   🎯 Endpoints:");
+    tracing::info!("      GET  /health           - Health check");
+    tracing::info!("      POST /encode           - Single text encoding");
+    tracing::info!("      POST /encode/batch     - Batch text encoding");
+
+    let listener = TcpListener::bind(&addr).await?;
+    
+    tracing::info!("✅ Server listening on http://{}", addr);
+    
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

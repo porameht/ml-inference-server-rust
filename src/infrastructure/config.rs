@@ -3,7 +3,8 @@ use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-use crate::domain::{ConfigurationService, ModelConfig};
+use crate::domain::entities::ModelConfig;
+use crate::domain::traits::ConfigurationService;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {

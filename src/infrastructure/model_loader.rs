@@ -7,7 +7,8 @@ use hf_hub::api::tokio::Api;
 use tokenizers::Tokenizer;
 use tokio::sync::RwLock;
 
-use crate::domain::{ModelConfig, ModelRepository};
+use crate::domain::entities::ModelConfig;
+use crate::domain::traits::ModelRepository;
 
 pub struct ModelComponents {
     pub model: BertModel,

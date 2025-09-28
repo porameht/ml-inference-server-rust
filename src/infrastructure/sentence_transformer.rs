@@ -2,12 +2,11 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use candle_core::Tensor;
 
-use crate::domain::{
-    BatchEmbeddingRequest, BatchEmbeddingResponse, EmbeddingRequest, EmbeddingResponse,
-    EmbeddingService, ModelConfig,
+use crate::domain::entities::{
+    BatchEmbeddingRequest, BatchEmbeddingResponse, EmbeddingRequest, EmbeddingResponse, ModelConfig,
 };
-use crate::infrastructure::CandleModelLoader;
-use crate::domain::ModelRepository;
+use crate::domain::traits::{EmbeddingService, ModelRepository};
+use crate::infrastructure::model_loader::CandleModelLoader;
 
 pub struct SentenceTransformerService {
     model_loader: Arc<CandleModelLoader>,

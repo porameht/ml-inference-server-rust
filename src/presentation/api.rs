@@ -9,7 +9,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-use crate::application::ApplicationServices;
+use crate::application::use_cases::EmbeddingUseCase;
+use crate::domain::entities::{EmbeddingResponse, BatchEmbeddingResponse};
+
 
 #[derive(Debug, Deserialize)]
 pub struct EncodeRequest {
@@ -66,14 +68,14 @@ fn default_normalize() -> bool {
     true
 }
 
-pub fn create_router(services: Arc<ApplicationServices>) -> Router {
+pub fn create_router(embedding_use_case: Arc<EmbeddingUseCase>) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .route("/encode", post(encode_single))
         .route("/encode/batch", post(encode_batch))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
-        .with_state(services)
+        .with_state(embedding_use_case)
 }
 
 async fn health_check() -> Json<ApiResponse<&'static str>> {
@@ -81,22 +83,23 @@ async fn health_check() -> Json<ApiResponse<&'static str>> {
 }
 
 async fn encode_single(
-    State(services): State<Arc<ApplicationServices>>,
+    State(embedding_use_case): State<Arc<EmbeddingUseCase>>,
     Json(request): Json<EncodeRequest>,
-) -> ApiResult<crate::domain::EmbeddingResponse> {
-    let result = services.embedding_use_case
+) -> ApiResult<EmbeddingResponse> {
+    let result = embedding_use_case
         .encode_single(request.text, request.normalize)
         .await;
     handle_result(result)
 }
 
 async fn encode_batch(
-    State(services): State<Arc<ApplicationServices>>,
+    State(embedding_use_case): State<Arc<EmbeddingUseCase>>,
     Json(request): Json<BatchEncodeRequest>,
-) -> ApiResult<crate::domain::BatchEmbeddingResponse> {
-    let result = services.embedding_use_case
+) -> ApiResult<BatchEmbeddingResponse> {
+    let result = embedding_use_case
         .encode_batch(request.texts, request.normalize)
         .await;
     handle_result(result)
 }
+
 
